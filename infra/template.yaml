@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "llm-rss IACR source — Lambda, Layer, EventBridge schedule, IAM"
+
+Parameters:
+  DeploymentBucket:
+    Type: String
+    Description: S3 bucket holding Lambda code and layer zips
+
+  LambdaZipKey:
+    Type: String
+    Description: S3 key for the Lambda function zip
+    Default: llm-rss/iacr-lambda.zip
+
+  LayerZipKey:
+    Type: String
+    Description: S3 key for the Lambda layer zip
+    Default: llm-rss/iacr-layer.zip
+
+  SesVerifiedIdentity:
+    Type: String
+    Description: SES verified email address used as sender/recipient (must be verified in SES)
+
+Resources:
+
+  # -------------------------------------------------------------------------
+  # Lambda Layer (dependencies)
+  # -------------------------------------------------------------------------
+  DependenciesLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: llm-rss-iacr-deps
+      Description: Python dependencies for llm-rss IACR handler
+      CompatibleRuntimes:
+        - python3.12
+      Content:
+        S3Bucket: !Ref DeploymentBucket
+        S3Key: !Ref LayerZipKey
+
+  # -------------------------------------------------------------------------
+  # IAM Role
+  # -------------------------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: llm-rss-iacr-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: llm-rss-iacr-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadSSMParams
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/llm-rss/*"
+              - Sid: InvokeBedrock
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: "*"
+              - Sid: SendSES
+                Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SesVerifiedIdentity}"
+
+  # -------------------------------------------------------------------------
+  # Lambda Function
+  # -------------------------------------------------------------------------
+  IacrLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: llm-rss-iacr
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Layers:
+        - !Ref DependenciesLayer
+      Code:
+        S3Bucket: !Ref DeploymentBucket
+        S3Key: !Ref LambdaZipKey
+      Environment:
+        Variables:
+          PYTHONPATH: /opt/python
+
+  # -------------------------------------------------------------------------
+  # EventBridge scheduled rule — Monday 07:30 UTC (08:30 CET)
+  # -------------------------------------------------------------------------
+  IacrScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: llm-rss-iacr-weekly
+      Description: Trigger IACR Lambda weekly on Monday at 07:30 UTC
+      ScheduleExpression: "cron(30 7 ? * MON *)"
+      State: ENABLED
+      Targets:
+        - Id: IacrLambdaTarget
+          Arn: !GetAtt IacrLambda.Arn
+
+  IacrSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt IacrLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt IacrScheduleRule.Arn
+
+Outputs:
+  LambdaFunctionName:
+    Value: !Ref IacrLambda
+  LambdaFunctionArn:
+    Value: !GetAtt IacrLambda.Arn
+  LayerArn:
+    Value: !Ref DependenciesLayer
+  ScheduleRuleName:
+    Value: !Ref IacrScheduleRule
