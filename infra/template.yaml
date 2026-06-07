@@ -16,11 +16,29 @@ Parameters:
     Description: S3 key for the Lambda layer zip
     Default: llm-rss/iacr-layer.zip
 
+  TriggerZipKey:
+    Type: String
+    Description: S3 key for the Trigger Lambda zip
+    Default: llm-rss/trigger-lambda.zip
+
   SesVerifiedIdentity:
     Type: String
     Description: SES verified email address used as sender/recipient (must be verified in SES)
 
 Resources:
+
+  # -------------------------------------------------------------------------
+  # Signing secret — value created out-of-band; stack references it by name
+  # -------------------------------------------------------------------------
+  DeepDiveSigningSecret:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /llm-rss/deep-dive/signing-secret
+      Type: String
+      Value: "REPLACE_ME"
+      Description: >
+        HMAC-SHA256 signing secret for Deep Dive links.
+        Update this value out-of-band; never commit the real secret.
 
   # -------------------------------------------------------------------------
   # Lambda Layer (dependencies)
@@ -37,7 +55,7 @@ Resources:
         S3Key: !Ref LayerZipKey
 
   # -------------------------------------------------------------------------
-  # IAM Role
+  # IAM Role — batch handler
   # -------------------------------------------------------------------------
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -80,7 +98,41 @@ Resources:
                   - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/*"
 
   # -------------------------------------------------------------------------
-  # Lambda Function
+  # IAM Role — trigger Lambda
+  # -------------------------------------------------------------------------
+  TriggerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: llm-rss-trigger-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: llm-rss-trigger-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadSigningSecret
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/llm-rss/deep-dive/*"
+              - Sid: InvokeWorker
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:llm-rss-deep-dive-worker"
+
+  # -------------------------------------------------------------------------
+  # Lambda Function — batch handler
   # -------------------------------------------------------------------------
   IacrLambda:
     Type: AWS::Lambda::Function
@@ -99,6 +151,42 @@ Resources:
       Environment:
         Variables:
           PYTHONPATH: /opt/python
+          DEEP_DIVE_BASE_URL: !GetAtt TriggerFunctionUrl.FunctionUrl
+          DEEP_DIVE_SIGNING_SECRET: !Sub "{{resolve:ssm:/llm-rss/deep-dive/signing-secret}}"
+
+  # -------------------------------------------------------------------------
+  # Lambda Function — trigger (public entry point)
+  # -------------------------------------------------------------------------
+  TriggerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: llm-rss-deep-dive-trigger
+      Runtime: python3.12
+      Handler: trigger_handler.lambda_handler
+      Role: !GetAtt TriggerExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Code:
+        S3Bucket: !Ref DeploymentBucket
+        S3Key: !Ref TriggerZipKey
+      Environment:
+        Variables:
+          DEEP_DIVE_SIGNING_SECRET: !Sub "{{resolve:ssm:/llm-rss/deep-dive/signing-secret}}"
+          WORKER_FUNCTION_NAME: llm-rss-deep-dive-worker
+
+  TriggerFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt TriggerLambda.Arn
+      AuthType: NONE
+
+  TriggerFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TriggerLambda.Arn
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
 
   # -------------------------------------------------------------------------
   # EventBridge scheduled rule — Monday 07:30 UTC (08:30 CET)
@@ -131,3 +219,7 @@ Outputs:
     Value: !Ref DependenciesLayer
   ScheduleRuleName:
     Value: !Ref IacrScheduleRule
+  TriggerFunctionArn:
+    Value: !GetAtt TriggerLambda.Arn
+  TriggerFunctionUrl:
+    Value: !GetAtt TriggerFunctionUrl.FunctionUrl

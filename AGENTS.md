@@ -1,6 +1,7 @@
 ## Development
 
 - Use typing extensively, ensure safe typing in python
+- When implementing something, always use git worktrees inside .worktrees/ directory.
 - 
 
 ## Agent skills
