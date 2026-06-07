@@ -14,6 +14,8 @@ import httpx
 from langchain_aws import ChatBedrockConverse
 from pydantic import BaseModel
 
+import signing
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -212,10 +214,23 @@ async def analyze_records(
 # Email digest
 # ---------------------------------------------------------------------------
 
-def _build_paper_html(ar: AnalyzedRecord) -> str:
+_IACR_URL_PREFIX = "https://eprint.iacr.org/"
+
+
+def _extract_iacr_paper_id(url: str) -> Optional[str]:
+    if not url.startswith(_IACR_URL_PREFIX):
+        return None
+    return url[len(_IACR_URL_PREFIX):] or None
+
+
+def _build_paper_html(ar: AnalyzedRecord, deep_dive_url: Optional[str] = None) -> str:
     authors = ", ".join(ar.record.authors) if ar.record.authors else "Unknown"
     subjects = ", ".join(ar.record.subjects) if ar.record.subjects else ""
     subjects_line = f'<p class="paper-subjects">{subjects}</p>' if subjects else ""
+    deep_dive_line = (
+        f'<p class="paper-deep-dive"><a href="{deep_dive_url}">Request a deep dive &rarr;</a></p>'
+        if deep_dive_url else ""
+    )
     return (
         f'<div class="paper">'
         f'<p class="paper-title"><a href="{ar.record.url}">{ar.record.title}</a></p>'
@@ -224,8 +239,18 @@ def _build_paper_html(ar: AnalyzedRecord) -> str:
         f'<span class="paper-score">Score: {ar.score}/10</span>'
         f'<p class="paper-summary">{ar.summary}</p>'
         f'{subjects_line}'
+        f'{deep_dive_line}'
         f'</div>'
     )
+
+
+def _make_deep_dive_url(ar: AnalyzedRecord, base_url: str, secret: str) -> Optional[str]:
+    paper_id = _extract_iacr_paper_id(ar.record.url)
+    if not paper_id:
+        return None
+    token = signing.sign(SOURCE_NAME, paper_id, secret)
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url.rstrip('/')}{separator}token={token}"
 
 
 def _build_digest(analyzed: list[AnalyzedRecord], threshold: int) -> str:
@@ -237,9 +262,18 @@ def _build_digest(analyzed: list[AnalyzedRecord], threshold: int) -> str:
     if not passing:
         return ""
 
+    base_url = os.environ.get("DEEP_DIVE_BASE_URL")
+    secret = os.environ.get("DEEP_DIVE_SIGNING_SECRET")
+
     run_date = date.today().strftime("%B %-d, %Y")
     paper_count = len(passing)
-    papers_html = "\n".join(_build_paper_html(a) for a in passing)
+
+    def _deep_dive_url(ar: AnalyzedRecord) -> Optional[str]:
+        if base_url and secret:
+            return _make_deep_dive_url(ar, base_url, secret)
+        return None
+
+    papers_html = "\n".join(_build_paper_html(a, _deep_dive_url(a)) for a in passing)
     template = TEMPLATE_PATH.read_text()
     return template.format(
         subject=f"{SOURCE_NAME} Digest — {paper_count} paper{'s' if paper_count != 1 else ''} — {run_date}",
