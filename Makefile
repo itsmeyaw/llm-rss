@@ -5,18 +5,20 @@ SES_IDENTITY  ?= $(error Set SES_IDENTITY=verified@example.com)
 
 LAMBDA_ZIP    = dist/iacr-lambda.zip
 LAYER_ZIP     = dist/iacr-layer.zip
+TRIGGER_ZIP   = dist/trigger-lambda.zip
 LAYER_DIR     = dist/layer/python
 
-LAMBDA_ZIP_KEY = llm-rss/iacr-lambda.zip
-LAYER_ZIP_KEY  = llm-rss/iacr-layer.zip
+LAMBDA_ZIP_KEY  = llm-rss/iacr-lambda.zip
+LAYER_ZIP_KEY   = llm-rss/iacr-layer.zip
+TRIGGER_ZIP_KEY = llm-rss/trigger-lambda.zip
 
-.PHONY: build layer lambda upload deploy test clean
+.PHONY: build layer lambda trigger upload deploy test clean
 
 test:
 	@echo "==> Running tests"
 	pytest
 
-build: layer lambda
+build: layer lambda trigger
 
 layer:
 	@echo "==> Building Lambda layer"
@@ -32,10 +34,18 @@ lambda:
 	cd functions/iacr && zip -r ../../$(LAMBDA_ZIP) . --quiet
 	@echo "    $(LAMBDA_ZIP) ready"
 
+trigger:
+	@echo "==> Building Trigger Lambda zip"
+	mkdir -p dist
+	cd functions/trigger && zip -r ../../$(TRIGGER_ZIP) . --quiet
+	cd functions/iacr && zip -j ../../$(TRIGGER_ZIP) signing.py --quiet
+	@echo "    $(TRIGGER_ZIP) ready"
+
 upload: build
 	@echo "==> Uploading artifacts to s3://$(BUCKET)"
-	aws s3 cp $(LAMBDA_ZIP) s3://$(BUCKET)/$(LAMBDA_ZIP_KEY)
-	aws s3 cp $(LAYER_ZIP)  s3://$(BUCKET)/$(LAYER_ZIP_KEY)
+	aws s3 cp $(LAMBDA_ZIP)   s3://$(BUCKET)/$(LAMBDA_ZIP_KEY)
+	aws s3 cp $(LAYER_ZIP)    s3://$(BUCKET)/$(LAYER_ZIP_KEY)
+	aws s3 cp $(TRIGGER_ZIP)  s3://$(BUCKET)/$(TRIGGER_ZIP_KEY)
 
 deploy: upload
 	@echo "==> Deploying stack $(STACK_NAME)"
@@ -48,6 +58,7 @@ deploy: upload
 			DeploymentBucket=$(BUCKET) \
 			LambdaZipKey=$(LAMBDA_ZIP_KEY) \
 			LayerZipKey=$(LAYER_ZIP_KEY) \
+			TriggerZipKey=$(TRIGGER_ZIP_KEY) \
 			SesVerifiedIdentity=$(SES_IDENTITY)
 	@echo "==> Deploy complete"
 
