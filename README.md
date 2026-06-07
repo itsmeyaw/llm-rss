@@ -130,6 +130,42 @@ aws ssm put-parameter --region us-east-1 \
   --value "you@example.com" --type String
 ```
 
+#### 5. Provision Deep Dive prerequisites (out-of-band, one-time)
+
+These resources live outside the CloudFormation stack and must exist before the
+first `make deploy`:
+
+**a. Signing secret** — an HMAC key protecting Deep Dive links:
+
+```bash
+aws ssm put-parameter --region us-east-1 \
+  --name /llm-rss/deep-dive/signing-secret \
+  --value "$(openssl rand -hex 32)" \
+  --type SecureString
+```
+
+**b. Deep Dive model ID** — the CloudFormation stack creates `/llm-rss/iacr/deep-dive-model-id`
+with a default value of `us.anthropic.claude-sonnet-4-6`. Override after first deploy if
+you want a different model:
+
+```bash
+aws ssm put-parameter --region us-east-1 \
+  --name /llm-rss/iacr/deep-dive-model-id \
+  --value "us.anthropic.claude-opus-4-8" \
+  --type String --overwrite
+```
+
+**c. ECR repository + worker image** — run once before deploying, then re-run whenever
+deep-dive sources change (the content hash handles idempotency):
+
+```bash
+make ensure-image REGION=us-east-1
+```
+
+`ensure-image` calls `ensure-ecr` automatically. It creates the ECR repository if absent,
+computes a content hash of `functions/iacr/`, `functions/worker/Dockerfile`, and
+`requirements-worker.txt`, and builds+pushes only when that hash tag is not already in ECR.
+
 ### Deploying
 
 Push to `main` — the GitHub Actions workflow builds the Lambda artifacts, uploads
@@ -146,6 +182,9 @@ aws lambda invoke --function-name llm-rss-iacr /dev/stdout
 ```bash
 make deploy BUCKET=your-s3-bucket SES_IDENTITY=you@example.com REGION=us-east-1
 ```
+
+`make deploy` runs `ensure-image` (idempotent), builds and uploads the zip artifacts,
+then calls `cloudformation deploy` passing `DeepDiveImageUri` automatically.
 
 ## Testing
 

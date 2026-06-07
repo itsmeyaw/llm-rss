@@ -21,11 +21,31 @@ Parameters:
     Description: S3 key for the Trigger Lambda zip
     Default: llm-rss/trigger-lambda.zip
 
+  DeepDiveImageUri:
+    Type: String
+    Description: >
+      ECR image URI for the Deep Dive worker Lambda, tagged by content hash.
+      Format: <account>.dkr.ecr.<region>.amazonaws.com/llm-rss-deep-dive-worker:<hash>
+      Obtain via: make ensure-image
+
   SesVerifiedIdentity:
     Type: String
     Description: SES verified email address used as sender/recipient (must be verified in SES)
 
 Resources:
+
+  # -------------------------------------------------------------------------
+  # Deep Dive model ID — stronger model than the batch handler
+  # -------------------------------------------------------------------------
+  DeepDiveModelId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /llm-rss/iacr/deep-dive-model-id
+      Type: String
+      Value: us.anthropic.claude-sonnet-4-6
+      Description: >
+        Bedrock model ID used by the Deep Dive worker for full-paper analysis.
+        Defaults to Claude Sonnet; update to a stronger model as needed.
 
   # -------------------------------------------------------------------------
   # Signing secret — value created out-of-band; stack references it by name
@@ -130,6 +150,50 @@ Resources:
                   - lambda:InvokeFunction
                 Resource:
                   - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:llm-rss-deep-dive-worker"
+                  # The worker function is defined later in this template as DeepDiveWorkerLambda
+
+  # -------------------------------------------------------------------------
+  # IAM Role — Deep Dive worker Lambda
+  # -------------------------------------------------------------------------
+  WorkerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: llm-rss-deep-dive-worker-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: llm-rss-worker-policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadSSMParams
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/llm-rss/*"
+              - Sid: InvokeBedrock
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: "*"
+              - Sid: SendSES
+                Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource:
+                  - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${SesVerifiedIdentity}"
+                  - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/*"
 
   # -------------------------------------------------------------------------
   # Lambda Function — batch handler
@@ -172,7 +236,7 @@ Resources:
       Environment:
         Variables:
           DEEP_DIVE_SIGNING_SECRET: !Sub "{{resolve:ssm:/llm-rss/deep-dive/signing-secret}}"
-          WORKER_FUNCTION_NAME: llm-rss-deep-dive-worker
+          WORKER_FUNCTION_NAME: !Ref DeepDiveWorkerLambda
 
   TriggerFunctionUrl:
     Type: AWS::Lambda::Url
@@ -187,6 +251,20 @@ Resources:
       Action: lambda:InvokeFunctionUrl
       Principal: "*"
       FunctionUrlAuthType: NONE
+
+  # -------------------------------------------------------------------------
+  # Lambda Function — Deep Dive worker (container image)
+  # -------------------------------------------------------------------------
+  DeepDiveWorkerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: llm-rss-deep-dive-worker
+      PackageType: Image
+      Code:
+        ImageUri: !Ref DeepDiveImageUri
+      Role: !GetAtt WorkerExecutionRole.Arn
+      Timeout: 900
+      MemorySize: 3008
 
   # -------------------------------------------------------------------------
   # EventBridge scheduled rule — Monday 07:30 UTC (08:30 CET)
@@ -223,3 +301,7 @@ Outputs:
     Value: !GetAtt TriggerLambda.Arn
   TriggerFunctionUrl:
     Value: !GetAtt TriggerFunctionUrl.FunctionUrl
+  WorkerFunctionArn:
+    Value: !GetAtt DeepDiveWorkerLambda.Arn
+  WorkerFunctionName:
+    Value: !Ref DeepDiveWorkerLambda
