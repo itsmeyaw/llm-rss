@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deep Dive Request Received</title>
+  <style>
+    body {{
+      font-family: Georgia, serif;
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 24px 16px;
+      color: #1a1a1a;
+      background: #ffffff;
+    }}
+    h1 {{
+      font-size: 1.4rem;
+      margin-bottom: 4px;
+    }}
+    .meta {{
+      font-size: 0.85rem;
+      color: #666;
+      margin-bottom: 32px;
+    }}
+    .paper-id {{
+      font-size: 0.85rem;
+      color: #888;
+      margin-top: 16px;
+    }}
+    footer {{
+      margin-top: 40px;
+      font-size: 0.75rem;
+      color: #aaa;
+      border-top: 1px solid #e0e0e0;
+      padding-top: 16px;
+    }}
+  </style>
+</head>
+<body>
+  <h1>Deep Dive Request Received</h1>
+  <p class="meta">{source}</p>
+  <p>Your request for a full-text analysis has been queued. The results will arrive in a future Digest.</p>
+  <p class="paper-id">Paper: {paper_id}</p>
+  <footer>llm-rss Deep Dive</footer>
+</body>
+</html>
