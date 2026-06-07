@@ -10,7 +10,11 @@ LAYER_DIR     = dist/layer/python
 LAMBDA_ZIP_KEY = llm-rss/iacr-lambda.zip
 LAYER_ZIP_KEY  = llm-rss/iacr-layer.zip
 
-.PHONY: build layer lambda upload deploy clean
+.PHONY: build layer lambda upload deploy test clean
+
+test:
+	@echo "==> Running tests"
+	pytest
 
 build: layer lambda
 

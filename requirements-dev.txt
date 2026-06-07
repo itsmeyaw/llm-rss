@@ -1,0 +1,3 @@
+# Dev-only tooling — NOT bundled into the Lambda layer (see Makefile `layer`).
+-r requirements.txt
+pytest>=8.0

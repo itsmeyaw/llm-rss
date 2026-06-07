@@ -146,3 +146,14 @@ aws lambda invoke --function-name llm-rss-iacr /dev/stdout
 ```bash
 make deploy BUCKET=your-s3-bucket SES_IDENTITY=you@example.com REGION=us-east-1
 ```
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+make test
+```
+
+`pytest` is the project's test harness. Dev tooling lives in `requirements-dev.txt`
+and is **not** bundled into the deployed Lambda layer. Tests live in `tests/` at
+the repo root, so they are excluded from the Lambda zip.
