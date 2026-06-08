@@ -35,6 +35,13 @@ TEMPLATE_PATH = Path(__file__).parent / "templates" / "deep_dive.html"
 # Truncation limit to avoid exceeding model context window (~200k chars ≈ ~50k tokens)
 _MAX_MARKDOWN_CHARS = 200_000
 
+# The analysis produces seven verbose sections from a full paper. Bedrock's
+# Converse API applies a low default output cap when ``maxTokens`` is unset,
+# which truncated the long ``how_it_works`` section mid-generation and dropped
+# the trailing fields — structured-output validation then failed with
+# "Field required". Set an explicit, generous ceiling so the full object fits.
+_ANALYSIS_MAX_TOKENS = 8192
+
 # docling resolves its model cache from ``$HOME/.cache/docling/models`` by
 # default. In Lambda only ``/tmp`` is writable and the runtime ``$HOME``
 # (/home/sbx_userNNNN) differs from the build-time ``$HOME`` (/root), so docling
@@ -128,7 +135,7 @@ _USER_PROMPT_TEMPLATE = """Paper text (may be truncated):
 
 
 def _analyze(markdown: str, model_id: str) -> DeepDiveAnalysis:
-    llm = ChatBedrockConverse(model=model_id)
+    llm = ChatBedrockConverse(model=model_id, max_tokens=_ANALYSIS_MAX_TOKENS)
     structured_llm = llm.with_structured_output(DeepDiveAnalysis)
     prompt = _USER_PROMPT_TEMPLATE.format(markdown=markdown)
     return structured_llm.invoke([
