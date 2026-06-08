@@ -46,3 +46,24 @@ jobs:
             BUCKET=${{ vars.DEPLOY_BUCKET }} \
             SES_IDENTITY=${{ secrets.SES_IDENTITY }} \
             REGION=${{ vars.AWS_REGION }}
+
+      - name: Diagnose deployment failure
+        if: failure()
+        env:
+          REGION: ${{ vars.AWS_REGION }}
+          STACK: llm-rss-iacr
+        run: |
+          echo "=== Stack status ==="
+          aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
+            --query 'Stacks[0].StackStatus' --output text 2>&1 || true
+          echo "=== Recent stack events (FAILED) ==="
+          aws cloudformation describe-stack-events --region "$REGION" --stack-name "$STACK" \
+            --query 'StackEvents[?contains(ResourceStatus, `FAILED`)].[LogicalResourceId,ResourceStatusReason]' \
+            --output text 2>&1 | head -40 || true
+          echo "=== Validation events via change sets ==="
+          for cs in $(aws cloudformation list-change-sets --region "$REGION" --stack-name "$STACK" \
+              --query 'Summaries[].ChangeSetId' --output text 2>/dev/null); do
+            echo "--- change set: $cs ---"
+            aws cloudformation describe-change-set --region "$REGION" --change-set-name "$cs" \
+              --query '[Status,StatusReason]' --output text 2>&1 || true
+          done
