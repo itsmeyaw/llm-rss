@@ -11,9 +11,21 @@ LAYER_ZIP     = dist/iacr-layer.zip
 TRIGGER_ZIP   = dist/trigger-lambda.zip
 LAYER_DIR     = dist/layer/python
 
-LAMBDA_ZIP_KEY  = llm-rss/iacr-lambda.zip
-LAYER_ZIP_KEY   = llm-rss/iacr-layer.zip
-TRIGGER_ZIP_KEY = llm-rss/trigger-lambda.zip
+# Content hashes of each artifact's build inputs. Embedding the hash in the S3
+# key makes every code change produce a new key, so CloudFormation sees a
+# changed S3Key property and actually rolls the Lambda to the new code.
+# (A static key + in-place S3 overwrite leaves CFN thinking the resource is
+# unchanged, silently pinning the old code — same content-addressing trick the
+# worker image uses via WORKER_HASH.)
+hash = $(shell find $(1) -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-12)
+
+LAMBDA_HASH   = $(call hash,functions/iacr)
+LAYER_HASH    = $(call hash,requirements.txt)
+TRIGGER_HASH  = $(call hash,functions/trigger functions/iacr/signing.py)
+
+LAMBDA_ZIP_KEY  = llm-rss/iacr-lambda-$(LAMBDA_HASH).zip
+LAYER_ZIP_KEY   = llm-rss/iacr-layer-$(LAYER_HASH).zip
+TRIGGER_ZIP_KEY = llm-rss/trigger-lambda-$(TRIGGER_HASH).zip
 
 ECR_REGISTRY  = $(AWS_ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com
 ECR_IMAGE     = $(ECR_REGISTRY)/$(ECR_REPO)
