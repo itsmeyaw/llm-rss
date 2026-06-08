@@ -60,10 +60,16 @@ jobs:
           aws cloudformation describe-stack-events --region "$REGION" --stack-name "$STACK" \
             --query 'StackEvents[?contains(ResourceStatus, `FAILED`)].[LogicalResourceId,ResourceStatusReason]' \
             --output text 2>&1 | head -40 || true
-          echo "=== Validation events via change sets ==="
-          for cs in $(aws cloudformation list-change-sets --region "$REGION" --stack-name "$STACK" \
-              --query 'Summaries[].ChangeSetId' --output text 2>/dev/null); do
-            echo "--- change set: $cs ---"
-            aws cloudformation describe-change-set --region "$REGION" --change-set-name "$cs" \
-              --query '[Status,StatusReason]' --output text 2>&1 || true
-          done
+          echo "=== Newest change set validation detail ==="
+          CS=$(aws cloudformation list-change-sets --region "$REGION" --stack-name "$STACK" \
+            --query 'sort_by(Summaries, &CreationTime)[-1].ChangeSetId' --output text 2>/dev/null)
+          echo "change set: $CS"
+          aws cloudformation describe-change-set --region "$REGION" --change-set-name "$CS" \
+            --query '[Status,StatusReason]' --output text 2>&1 || true
+          echo "--- per-resource validation events ---"
+          aws cloudformation describe-events --region "$REGION" --change-set-name "$CS" \
+            --query 'OperationEvents[?EventType==`VALIDATION_ERROR`].[LogicalResourceId,ResourceStatusReason,StatusReason]' \
+            --output text 2>&1 || true
+          echo "--- raw events fallback ---"
+          aws cloudformation describe-events --region "$REGION" --change-set-name "$CS" \
+            --output json 2>&1 | head -60 || true
