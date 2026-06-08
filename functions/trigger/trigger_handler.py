@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 import boto3
 import signing
@@ -17,6 +18,27 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 WORKER_FUNCTION_NAME = os.environ.get("WORKER_FUNCTION_NAME", "llm-rss-deep-dive-worker")
+
+_signing_secret_cache: Optional[str] = None
+
+
+def _get_signing_secret() -> Optional[str]:
+    global _signing_secret_cache
+    if _signing_secret_cache:
+        return _signing_secret_cache
+    # Direct value takes precedence (local dev / tests)
+    direct = os.environ.get("DEEP_DIVE_SIGNING_SECRET")
+    if direct:
+        _signing_secret_cache = direct
+        return _signing_secret_cache
+    # In production, fetch SecureString from SSM
+    param_name = os.environ.get("DEEP_DIVE_SIGNING_SECRET_PARAM")
+    if not param_name:
+        return None
+    ssm = boto3.client("ssm")
+    resp = ssm.get_parameter(Name=param_name, WithDecryption=True)
+    _signing_secret_cache = resp["Parameter"]["Value"]
+    return _signing_secret_cache
 
 _ACK_TEMPLATE = Path(__file__).parent / "templates" / "ack.html"
 _BAD_TEMPLATE = Path(__file__).parent / "templates" / "invalid.html"
@@ -36,9 +58,9 @@ def _bad_request(message: str) -> dict:
 
 
 def lambda_handler(event: dict, context: object) -> dict:
-    secret = os.environ.get("DEEP_DIVE_SIGNING_SECRET")
+    secret = _get_signing_secret()
     if not secret:
-        logger.error("DEEP_DIVE_SIGNING_SECRET not configured")
+        logger.error("Signing secret not configured")
         return _bad_request("Service misconfigured.")
 
     params = event.get("queryStringParameters") or {}

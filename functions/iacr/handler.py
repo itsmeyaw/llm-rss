@@ -33,6 +33,25 @@ SSM_PREFIX = "/llm-rss/iacr"
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "digest.html"
 
+_signing_secret_cache: Optional[str] = None
+
+
+def _get_signing_secret() -> Optional[str]:
+    global _signing_secret_cache
+    if _signing_secret_cache:
+        return _signing_secret_cache
+    direct = os.environ.get("DEEP_DIVE_SIGNING_SECRET")
+    if direct:
+        _signing_secret_cache = direct
+        return _signing_secret_cache
+    param_name = os.environ.get("DEEP_DIVE_SIGNING_SECRET_PARAM")
+    if not param_name:
+        return None
+    ssm = boto3.client("ssm")
+    resp = ssm.get_parameter(Name=param_name, WithDecryption=True)
+    _signing_secret_cache = resp["Parameter"]["Value"]
+    return _signing_secret_cache
+
 
 # ---------------------------------------------------------------------------
 # Domain models
@@ -263,7 +282,7 @@ def _build_digest(analyzed: list[AnalyzedRecord], threshold: int) -> str:
         return ""
 
     base_url = os.environ.get("DEEP_DIVE_BASE_URL")
-    secret = os.environ.get("DEEP_DIVE_SIGNING_SECRET")
+    secret = _get_signing_secret()
 
     run_date = date.today().strftime("%B %-d, %Y")
     paper_count = len(passing)
