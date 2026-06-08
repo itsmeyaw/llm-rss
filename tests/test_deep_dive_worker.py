@@ -63,6 +63,9 @@ def test_happy_path_sends_result_email(monkeypatch):
     }
 
     with patch("deep_dive_worker.DocumentConverter", mock_converter), \
+         patch("deep_dive_worker.PdfPipelineOptions", MagicMock()), \
+         patch("deep_dive_worker.PdfFormatOption", MagicMock()), \
+         patch("deep_dive_worker.InputFormat", MagicMock()), \
          patch("deep_dive_worker.ChatBedrockConverse", mock_llm_class), \
          patch("boto3.client") as mock_boto3_client:
         mock_boto3_client.side_effect = lambda svc: mock_ssm if svc == "ssm" else mock_ses
@@ -102,6 +105,9 @@ def test_pdf_fetch_passes_browser_user_agent(monkeypatch):
     }
 
     with patch("deep_dive_worker.DocumentConverter", mock_converter), \
+         patch("deep_dive_worker.PdfPipelineOptions", MagicMock()), \
+         patch("deep_dive_worker.PdfFormatOption", MagicMock()), \
+         patch("deep_dive_worker.InputFormat", MagicMock()), \
          patch("deep_dive_worker.ChatBedrockConverse", mock_llm_class), \
          patch("boto3.client") as mock_boto3_client:
         mock_boto3_client.side_effect = lambda svc: mock_ssm if svc == "ssm" else mock_ses
@@ -112,6 +118,52 @@ def test_pdf_fetch_passes_browser_user_agent(monkeypatch):
     user_agent = headers.get("User-Agent", "")
     assert "Mozilla" in user_agent
     assert "docling" not in user_agent.lower()
+
+
+# ---------------------------------------------------------------------------
+# Cycle 5: docling reads prefetched models from a fixed artifacts path (not
+# $HOME, which is read-only in Lambda) and skips OCR (whose cache also lives
+# under $HOME). Otherwise model resolution writes to the read-only filesystem
+# and parsing dies with EROFS.
+# ---------------------------------------------------------------------------
+
+def test_parse_pdf_uses_prefetched_models_and_skips_ocr(monkeypatch):
+    monkeypatch.setenv("DEEP_DIVE_SIGNING_SECRET", "test-secret")
+    monkeypatch.setenv("DOCLING_ARTIFACTS_PATH", "/opt/docling-models")
+
+    mock_converter = MagicMock()
+    mock_doc = MagicMock()
+    mock_doc.export_to_markdown.return_value = "# Test Paper\n\nFull paper text."
+    mock_result = MagicMock()
+    mock_result.document = mock_doc
+    mock_converter.return_value.convert.return_value = mock_result
+
+    mock_pipeline_options = MagicMock()
+    mock_pdf_format_option = MagicMock()
+
+    mock_llm_instance = MagicMock()
+    mock_llm_instance.with_structured_output.return_value.invoke.return_value = _make_analysis()
+    mock_llm_class = MagicMock(return_value=mock_llm_instance)
+
+    mock_ses = MagicMock()
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameters.return_value = {
+        "Parameters": [{"Name": k, "Value": v} for k, v in _ssm_params().items()]
+    }
+
+    with patch("deep_dive_worker.DocumentConverter", mock_converter), \
+         patch("deep_dive_worker.PdfPipelineOptions", mock_pipeline_options), \
+         patch("deep_dive_worker.PdfFormatOption", mock_pdf_format_option), \
+         patch("deep_dive_worker.InputFormat", MagicMock()), \
+         patch("deep_dive_worker.ChatBedrockConverse", mock_llm_class), \
+         patch("boto3.client") as mock_boto3_client:
+        mock_boto3_client.side_effect = lambda svc: mock_ssm if svc == "ssm" else mock_ses
+        result = deep_dive_worker.lambda_handler(_make_event(), {})
+
+    assert result["status"] == "sent"
+    pipeline_kwargs = mock_pipeline_options.call_args[1]
+    assert pipeline_kwargs["artifacts_path"] == "/opt/docling-models"
+    assert pipeline_kwargs["do_ocr"] is False
 
 
 # ---------------------------------------------------------------------------

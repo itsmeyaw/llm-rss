@@ -7,6 +7,7 @@ is sent instead of failing silently.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import boto3
@@ -14,9 +15,14 @@ from langchain_aws import ChatBedrockConverse
 from pydantic import BaseModel
 
 try:
-    from docling.document_converter import DocumentConverter
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 except ImportError:
     DocumentConverter = None  # type: ignore[assignment,misc]
+    PdfPipelineOptions = None  # type: ignore[assignment,misc]
+    PdfFormatOption = None  # type: ignore[assignment,misc]
+    InputFormat = None  # type: ignore[assignment,misc]
 
 import signing
 
@@ -28,6 +34,14 @@ TEMPLATE_PATH = Path(__file__).parent / "templates" / "deep_dive.html"
 
 # Truncation limit to avoid exceeding model context window (~200k chars ≈ ~50k tokens)
 _MAX_MARKDOWN_CHARS = 200_000
+
+# docling resolves its model cache from ``$HOME/.cache/docling/models`` by
+# default. In Lambda only ``/tmp`` is writable and the runtime ``$HOME``
+# (/home/sbx_userNNNN) differs from the build-time ``$HOME`` (/root), so docling
+# can't find the baked-in models and tries to re-download them — writing to the
+# read-only filesystem and failing with ``[Errno 30] Read-only file system``.
+# Point it at the fixed path the Dockerfile prefetches models into instead.
+_ARTIFACTS_PATH = os.environ.get("DOCLING_ARTIFACTS_PATH", "/opt/docling-models")
 
 # eprint.iacr.org sits behind Cloudflare, which 403s docling-core's default
 # ``docling-core/<version>`` User-Agent. Send a browser UA so the fetch is
@@ -71,7 +85,18 @@ def _get_ssm_params() -> dict:
 # ---------------------------------------------------------------------------
 
 def _parse_pdf(pdf_url: str) -> str:
-    converter = DocumentConverter()
+    # IACR papers carry a real text layer, so OCR is unneeded — and EasyOCR's
+    # cache lives under ``$HOME`` (separate from ``artifacts_path``), which is
+    # read-only in Lambda. Disabling OCR avoids that write and speeds parsing.
+    pipeline_options = PdfPipelineOptions(
+        artifacts_path=_ARTIFACTS_PATH,
+        do_ocr=False,
+    )
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+        }
+    )
     result = converter.convert(pdf_url, headers={"User-Agent": _BROWSER_USER_AGENT})
     markdown = result.document.export_to_markdown()
     if len(markdown) > _MAX_MARKDOWN_CHARS:

@@ -9,9 +9,16 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     docling
 
-# Bake model weights into the image so nothing is downloaded at cold start.
-# docling fetches models on first DocumentConverter() instantiation.
-RUN python -c "from docling.document_converter import DocumentConverter; DocumentConverter(); print('Models baked in.')"
+# Bake model weights into a fixed path so nothing is downloaded at runtime.
+# docling's default cache is $HOME/.cache/docling/models, but the build-time
+# $HOME (/root) differs from the Lambda runtime $HOME (/home/sbx_userNNNN),
+# which is read-only — so a $HOME-relative cache can't be found at runtime and
+# docling tries to re-download, failing with EROFS. Pin the cache to an
+# absolute path and point docling at it via DOCLING_ARTIFACTS_PATH so model
+# resolution never depends on $HOME. OCR is disabled in the handler, so skip
+# the EasyOCR models.
+ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
+RUN docling-tools models download -o /opt/docling-models && echo "Models baked in."
 
 # Install remaining Lambda dependencies
 COPY requirements-worker.txt .
