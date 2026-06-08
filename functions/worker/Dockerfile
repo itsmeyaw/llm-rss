@@ -10,11 +10,7 @@ RUN pip install --no-cache-dir \
 
 # Bake model weights into the image so nothing is downloaded at cold start.
 # docling fetches models on first DocumentConverter() instantiation.
-RUN python -c "
-from docling.document_converter import DocumentConverter
-DocumentConverter()
-print('Models baked in.')
-"
+RUN python -c "from docling.document_converter import DocumentConverter; DocumentConverter(); print('Models baked in.')"
 
 # Install remaining Lambda dependencies
 COPY requirements-worker.txt .

@@ -70,6 +70,7 @@ ensure-image: ensure-ecr
 		--image-ids imageTag=$(WORKER_HASH) > /dev/null 2>&1; then \
 		echo "    Image $(WORKER_HASH) already present — skipping build"; \
 	else \
+		set -e; \
 		echo "==> Building worker image"; \
 		docker build \
 			--platform linux/amd64 \
