@@ -35,17 +35,15 @@ Parameters:
 Resources:
 
   # -------------------------------------------------------------------------
-  # Deep Dive model ID — stronger model than the batch handler
+  # NOTE: /llm-rss/iacr/deep-dive-model-id is managed out-of-band (like the
+  # signing secret), not by this template. CloudFormation early validation
+  # (NAME_CONFLICT_VALIDATION) fails a changeset when a template-declared
+  # AWS::SSM::Parameter already exists. The Deep Dive worker reads this value
+  # at runtime and falls back to us.anthropic.claude-sonnet-4-6 if unset.
+  # Set/override it with:
+  #   aws ssm put-parameter --name /llm-rss/iacr/deep-dive-model-id \
+  #       --type String --value <model-id> --overwrite
   # -------------------------------------------------------------------------
-  DeepDiveModelId:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: /llm-rss/iacr/deep-dive-model-id
-      Type: String
-      Value: us.anthropic.claude-sonnet-4-6
-      Description: >
-        Bedrock model ID used by the Deep Dive worker for full-paper analysis.
-        Defaults to Claude Sonnet; update to a stronger model as needed.
 
   # -------------------------------------------------------------------------
   # Lambda Layer (dependencies)
