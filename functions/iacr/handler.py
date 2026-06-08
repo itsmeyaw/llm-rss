@@ -266,6 +266,11 @@ def _build_paper_html(ar: AnalyzedRecord, deep_dive_url: Optional[str] = None) -
 def _make_deep_dive_url(ar: AnalyzedRecord, base_url: str, secret: str) -> Optional[str]:
     paper_id = _extract_iacr_paper_id(ar.record.url)
     if not paper_id:
+        logger.warning(
+            "Skipping deep dive link for %r: URL %r is not a recognised IACR ePrint identifier",
+            ar.record.title,
+            ar.record.url,
+        )
         return None
     token = signing.sign(SOURCE_NAME, paper_id, secret)
     separator = "&" if "?" in base_url else "?"
@@ -283,6 +288,17 @@ def _build_digest(analyzed: list[AnalyzedRecord], threshold: int) -> str:
 
     base_url = os.environ.get("DEEP_DIVE_BASE_URL")
     secret = _get_signing_secret()
+
+    if not (base_url and secret):
+        missing = []
+        if not base_url:
+            missing.append("DEEP_DIVE_BASE_URL")
+        if not secret:
+            missing.append("DEEP_DIVE_SIGNING_SECRET/_PARAM")
+        logger.warning(
+            "Deep dive links omitted from digest — missing configuration: %s",
+            ", ".join(missing),
+        )
 
     run_date = date.today().strftime("%B %-d, %Y")
     paper_count = len(passing)

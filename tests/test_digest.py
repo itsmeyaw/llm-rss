@@ -67,3 +67,38 @@ def test_build_digest_omits_deep_dive_link_when_base_url_absent(monkeypatch):
     assert html  # renders without crashing
     assert "Request a deep dive" not in html
     assert "token=" not in html
+
+
+# ---------------------------------------------------------------------------
+# _build_digest — warning on missing deep dive links
+# ---------------------------------------------------------------------------
+
+def test_build_digest_warns_once_when_deep_dive_config_missing(monkeypatch, caplog):
+    monkeypatch.delenv("DEEP_DIVE_BASE_URL", raising=False)
+    monkeypatch.setenv("DEEP_DIVE_SIGNING_SECRET", "test-secret")
+
+    with caplog.at_level("WARNING", logger=handler.logger.name):
+        handler._build_digest([_make_analyzed(), _make_analyzed()], threshold=7)
+
+    config_warnings = [
+        r for r in caplog.records
+        if r.levelname == "WARNING" and "DEEP_DIVE_BASE_URL" in r.getMessage()
+    ]
+    assert len(config_warnings) == 1  # warned once for the digest, not per paper
+
+
+def test_build_digest_warns_per_paper_when_url_unrecognized(monkeypatch, caplog):
+    monkeypatch.setenv("DEEP_DIVE_BASE_URL", "https://trigger.example.com/")
+    monkeypatch.setenv("DEEP_DIVE_SIGNING_SECRET", "test-secret")
+
+    ar = _make_analyzed(url="https://example.com/not-iacr")
+
+    with caplog.at_level("WARNING", logger=handler.logger.name):
+        html = handler._build_digest([ar], threshold=7)
+
+    assert "Request a deep dive" not in html
+    paper_warnings = [
+        r for r in caplog.records
+        if r.levelname == "WARNING" and "https://example.com/not-iacr" in r.getMessage()
+    ]
+    assert len(paper_warnings) == 1
