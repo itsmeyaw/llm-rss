@@ -47,29 +47,22 @@ jobs:
             SES_IDENTITY=${{ secrets.SES_IDENTITY }} \
             REGION=${{ vars.AWS_REGION }}
 
+      # On a failed deploy, the bare "ResourceExistenceCheck" error from
+      # `cloudformation deploy` doesn't name the offending resource. This step
+      # pulls the per-resource VALIDATION_ERROR details from the newest change
+      # set so the actual cause (name conflict, missing dependency, etc.) is
+      # visible in the run log.
       - name: Diagnose deployment failure
         if: failure()
         env:
           REGION: ${{ vars.AWS_REGION }}
           STACK: llm-rss-iacr
         run: |
-          echo "=== Stack status ==="
           aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
             --query 'Stacks[0].StackStatus' --output text 2>&1 || true
-          echo "=== Recent stack events (FAILED) ==="
-          aws cloudformation describe-stack-events --region "$REGION" --stack-name "$STACK" \
-            --query 'StackEvents[?contains(ResourceStatus, `FAILED`)].[LogicalResourceId,ResourceStatusReason]' \
-            --output text 2>&1 | head -40 || true
-          echo "=== Newest change set validation detail ==="
           CS=$(aws cloudformation list-change-sets --region "$REGION" --stack-name "$STACK" \
             --query 'sort_by(Summaries, &CreationTime)[-1].ChangeSetId' --output text 2>/dev/null)
-          echo "change set: $CS"
-          aws cloudformation describe-change-set --region "$REGION" --change-set-name "$CS" \
-            --query '[Status,StatusReason]' --output text 2>&1 || true
-          echo "--- per-resource validation events ---"
+          echo "newest change set: $CS"
           aws cloudformation describe-events --region "$REGION" --change-set-name "$CS" \
-            --query 'OperationEvents[?EventType==`VALIDATION_ERROR`].[LogicalResourceId,ResourceStatusReason,StatusReason]' \
+            --query 'OperationEvents[?EventType==`VALIDATION_ERROR`].[ValidationName,LogicalResourceId,ValidationStatusReason]' \
             --output text 2>&1 || true
-          echo "--- raw events fallback ---"
-          aws cloudformation describe-events --region "$REGION" --change-set-name "$CS" \
-            --output json 2>&1 | head -60 || true
