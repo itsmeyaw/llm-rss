@@ -9,6 +9,18 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     docling
 
+# docling pulls in rapidocr, which unconditionally requires the GUI build of
+# opencv (opencv-python). That wheel's cv2 .so links against X11/GUI system
+# libraries (libxcb.so.1, libGL.so.1, ...) that the Amazon Linux 2023 Lambda
+# base image doesn't ship, so the layout pipeline crashes at runtime with
+# "libxcb.so.1: cannot open shared object file". Swap in the headless wheel,
+# which provides an identical cv2 module built without any GUI/X11 link deps.
+# Then assert cv2 actually loads at build time so a missing-shared-object
+# regression fails the build instead of surfacing as a runtime parse error.
+RUN pip uninstall -y opencv-python opencv-contrib-python 2>/dev/null; \
+    pip install --no-cache-dir opencv-python-headless && \
+    python -c "import cv2; print('cv2', cv2.__version__, 'loads headless')"
+
 # Bake model weights into a fixed path so nothing is downloaded at runtime.
 # docling's default cache is $HOME/.cache/docling/models, but the build-time
 # $HOME (/root) differs from the Lambda runtime $HOME (/home/sbx_userNNNN),
