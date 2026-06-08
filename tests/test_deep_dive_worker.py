@@ -77,6 +77,44 @@ def test_happy_path_sends_result_email(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Cycle 4: PDF fetch sends a browser User-Agent so Cloudflare (which fronts
+# eprint.iacr.org) does not 403 the default docling-core User-Agent.
+# ---------------------------------------------------------------------------
+
+def test_pdf_fetch_passes_browser_user_agent(monkeypatch):
+    monkeypatch.setenv("DEEP_DIVE_SIGNING_SECRET", "test-secret")
+
+    mock_converter = MagicMock()
+    mock_doc = MagicMock()
+    mock_doc.export_to_markdown.return_value = "# Test Paper\n\nFull paper text."
+    mock_result = MagicMock()
+    mock_result.document = mock_doc
+    mock_converter.return_value.convert.return_value = mock_result
+
+    mock_llm_instance = MagicMock()
+    mock_llm_instance.with_structured_output.return_value.invoke.return_value = _make_analysis()
+    mock_llm_class = MagicMock(return_value=mock_llm_instance)
+
+    mock_ses = MagicMock()
+    mock_ssm = MagicMock()
+    mock_ssm.get_parameters.return_value = {
+        "Parameters": [{"Name": k, "Value": v} for k, v in _ssm_params().items()]
+    }
+
+    with patch("deep_dive_worker.DocumentConverter", mock_converter), \
+         patch("deep_dive_worker.ChatBedrockConverse", mock_llm_class), \
+         patch("boto3.client") as mock_boto3_client:
+        mock_boto3_client.side_effect = lambda svc: mock_ssm if svc == "ssm" else mock_ses
+        deep_dive_worker.lambda_handler(_make_event(), {})
+
+    convert_kwargs = mock_converter.return_value.convert.call_args[1]
+    headers = convert_kwargs.get("headers", {})
+    user_agent = headers.get("User-Agent", "")
+    assert "Mozilla" in user_agent
+    assert "docling" not in user_agent.lower()
+
+
+# ---------------------------------------------------------------------------
 # Cycle 2: docling failure → failure email sent
 # ---------------------------------------------------------------------------
 

@@ -29,6 +29,14 @@ TEMPLATE_PATH = Path(__file__).parent / "templates" / "deep_dive.html"
 # Truncation limit to avoid exceeding model context window (~200k chars ≈ ~50k tokens)
 _MAX_MARKDOWN_CHARS = 200_000
 
+# eprint.iacr.org sits behind Cloudflare, which 403s docling-core's default
+# ``docling-core/<version>`` User-Agent. Send a browser UA so the fetch is
+# treated as an ordinary download.
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 
 # ---------------------------------------------------------------------------
 # Analysis schema
@@ -64,7 +72,7 @@ def _get_ssm_params() -> dict:
 
 def _parse_pdf(pdf_url: str) -> str:
     converter = DocumentConverter()
-    result = converter.convert(pdf_url)
+    result = converter.convert(pdf_url, headers={"User-Agent": _BROWSER_USER_AGENT})
     markdown = result.document.export_to_markdown()
     if len(markdown) > _MAX_MARKDOWN_CHARS:
         logger.warning("Markdown truncated from %d to %d chars", len(markdown), _MAX_MARKDOWN_CHARS)

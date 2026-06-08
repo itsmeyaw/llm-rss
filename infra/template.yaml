@@ -237,6 +237,20 @@ Resources:
       Principal: "*"
       FunctionUrlAuthType: NONE
 
+  # Since October 2025, public Function URLs (AuthType NONE) require BOTH
+  # lambda:InvokeFunctionUrl AND lambda:InvokeFunction in the resource-based
+  # policy. Without this second grant the URL returns 403 Forbidden at the
+  # auth layer before the function ever runs.
+  # NOTE: FunctionUrlAuthType is only valid for the InvokeFunctionUrl action,
+  # not InvokeFunction — adding it here fails AddPermission at deploy time.
+  # See: https://docs.aws.amazon.com/lambda/latest/dg/urls-auth.html
+  TriggerFunctionUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TriggerLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: "*"
+
   # -------------------------------------------------------------------------
   # Lambda Function — Deep Dive worker (container image)
   # -------------------------------------------------------------------------
