@@ -48,19 +48,6 @@ Resources:
         Defaults to Claude Sonnet; update to a stronger model as needed.
 
   # -------------------------------------------------------------------------
-  # Signing secret — value created out-of-band; stack references it by name
-  # -------------------------------------------------------------------------
-  DeepDiveSigningSecret:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: /llm-rss/deep-dive/signing-secret
-      Type: String
-      Value: "REPLACE_ME"
-      Description: >
-        HMAC-SHA256 signing secret for Deep Dive links.
-        Update this value out-of-band; never commit the real secret.
-
-  # -------------------------------------------------------------------------
   # Lambda Layer (dependencies)
   # -------------------------------------------------------------------------
   DependenciesLayer:
@@ -216,7 +203,7 @@ Resources:
         Variables:
           PYTHONPATH: /opt/python
           DEEP_DIVE_BASE_URL: !GetAtt TriggerFunctionUrl.FunctionUrl
-          DEEP_DIVE_SIGNING_SECRET: !Sub "{{resolve:ssm:/llm-rss/deep-dive/signing-secret}}"
+          DEEP_DIVE_SIGNING_SECRET: !Sub "{{resolve:ssm-secure:/llm-rss/deep-dive/signing-secret}}"
 
   # -------------------------------------------------------------------------
   # Lambda Function — trigger (public entry point)
@@ -235,7 +222,7 @@ Resources:
         S3Key: !Ref TriggerZipKey
       Environment:
         Variables:
-          DEEP_DIVE_SIGNING_SECRET: !Sub "{{resolve:ssm:/llm-rss/deep-dive/signing-secret}}"
+          DEEP_DIVE_SIGNING_SECRET: !Sub "{{resolve:ssm-secure:/llm-rss/deep-dive/signing-secret}}"
           WORKER_FUNCTION_NAME: !Ref DeepDiveWorkerLambda
 
   TriggerFunctionUrl:
