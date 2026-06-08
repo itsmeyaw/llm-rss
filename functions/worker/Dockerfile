@@ -1,8 +1,9 @@
 FROM public.ecr.aws/lambda/python:3.12
 
-# Install CPU-only torch first (avoids pulling CUDA wheels)
+# Install CPU-only torch + torchvision from the same index so their ABIs match
+# (a mismatched torchvision pulled later by docling breaks torchvision::nms).
 RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu
+    torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 # Install docling and its layout/table-structure models
 RUN pip install --no-cache-dir \
